@@ -138,8 +138,9 @@ def append_slate(video: Path, card: Path, out: Path, secs=4.0):
     cmd = ["ffmpeg", "-v", "error", "-stats", "-y", "-i", str(video),
            "-loop", "1", "-t", str(secs), "-i", str(card),
            "-filter_complex",
-           f"[1:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
-           f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,"
+           # scale to ~80% then pad to full frame -> even margin around the card
+           f"[1:v]scale={int(int(w)*0.8)}:{int(int(h)*0.8)}:force_original_aspect_ratio=decrease,"
+           f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:0x0D0F14,setsar=1,fps=30,"
            f"fade=t=in:st=0:d=0.5[s];[0:v][s]concat=n=2:v=1[v]"]
     cmd += ["-map", "[v]", "-map", "0:a?"] + encoder_args("12M") + [str(out)]
     subprocess.run(cmd, check=True)

@@ -458,13 +458,18 @@ def main() -> None:
 
     # Freeze the map while parked: Arc keeps logging jittery positions at a
     # stop, and map-matching snaps them to nearby roads, so the inset would
-    # wander while the footage sits still. Below a walking-pace threshold, hold
-    # the last moving position (and thus the trail) instead of following jitter.
-    STATIONARY = 0.8  # m/s
+    # wander while the footage sits still. Instantaneous speed is fooled by the
+    # jitter (points jump several metres), so gate on speed averaged over a few
+    # seconds and hold the last moving position when it's below a crawl.
+    STATIONARY = 1.6  # m/s (~3.6 mph)
+    win = max(1, int(2.5 * args.fps))
+    sp = [(f.speed_mps or 0.0) for f in frames]
+    smooth = [sum(sp[max(0, i - win):i + win + 1]) / len(sp[max(0, i - win):i + win + 1])
+              for i in range(len(frames))]
     hold = None
-    for f in frames:
-        if f.has_fix and f.lat is not None and f.speed_mps is not None:
-            if f.speed_mps < STATIONARY and hold is not None:
+    for i, f in enumerate(frames):
+        if f.has_fix and f.lat is not None:
+            if smooth[i] < STATIONARY and hold is not None:
                 f.lat, f.lon = hold
                 f.speed_mps = 0.0
             else:
