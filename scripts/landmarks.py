@@ -39,7 +39,7 @@ SAMPLE = 8                        # test every Nth frame (speed)
 CATS = {
     "state":      (0, 5), "county": (0, 4), "city": (0, 4),
     "water":      (0, 3),
-    "peak":       (2500, 2), "lake": (900, 2), "park": (500, 1),
+    "lake": (700, 2), "park": (500, 1),
     "university": (700, 2), "historic": (350, 1), "airport": (3500, 2),
     "poi":        (400, 1),
 }
@@ -49,8 +49,6 @@ def classify(p: dict):
     """Map OSM tags to a landmark category, or None."""
     if p.get("waterway") in ("river", "stream", "canal"):
         return "water"
-    if p.get("natural") == "peak":
-        return "peak"
     if p.get("natural") == "water":
         return "lake"
     if (p.get("leisure") in ("park", "nature_reserve")
@@ -72,7 +70,7 @@ def classify(p: dict):
 # --------------------------------------------------------------------------
 
 OSM_FILTERS = [
-    "nwr/waterway=river,stream,canal", "nwr/natural=peak,water",
+    "nwr/waterway=river,stream,canal", "nwr/natural=water",
     "nwr/leisure=park,nature_reserve", "nwr/boundary=protected_area,national_park",
     "nwr/amenity=university,college", "nwr/historic", "nwr/aeroway=aerodrome",
     "nwr/tourism=attraction,viewpoint,museum",
