@@ -260,6 +260,15 @@ so those classes differ only by alpha. Harmless around Madison (no motorways);
 on interstate footage, raise `TRAIL_W` to give the grey more headroom rather
 than lifting the cap.
 
+A **compass** rose (heading-up needle, cardinal readout) sits by the map disc,
+and **landmark callouts** flash a brief centred banner (`scripts/landmarks.py`):
+boundary crossings ("ENTERING TENNESSEE" / county / city), named water crossings
+("CROSSING ALDRIDGE CREEK"), and passing notable features (peaks, lakes, parks,
+universities, historic sites, airports) — extracted per-GPX from OSM like the
+roads, curated by category and throttled so they never spam. Events are detected
+once into `events_*.json` and drawn for ~3s each; in a timelapse they're remapped
+to output frames so they don't flash past.
+
 The **travelled route** is the only highlight: bold white, persisting for the
 whole drive, so roads already behind you stay lit. Nothing is highlighted by OSM
 way id — doing that lights up the whole of e.g. Bell Road including the part you

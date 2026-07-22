@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cairo  # noqa: E402
 
-from hud import TRAIL_DECIMATE, H, W, RoadNet, render  # noqa: E402
+from hud import TRAIL_DECIMATE, H, W, RoadNet, frame_callouts, render  # noqa: E402
 from settings import encoder_args  # noqa: E402
 
 
@@ -85,6 +85,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--seconds", type=float, help="render only the first N seconds")
+    ap.add_argument("--events", type=Path, help="landmarks.py output")
     ap.add_argument("--bitrate", default="12M")
     args = ap.parse_args()
 
@@ -94,6 +95,8 @@ def main() -> None:
     if args.seconds:
         n = min(n, int(args.seconds * args.fps))
 
+    callouts = frame_callouts(json.loads(args.events.read_text()), len(frames)) \
+        if args.events and args.events.exists() else [None] * len(frames)
     t_idx, t_pts, t_runs = build_trail_index(frames)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -117,7 +120,8 @@ def main() -> None:
     try:
         for i in range(n):
             rec = frames[i]
-            surf = render(rec, net, trail=trail_upto(t_idx, t_pts, t_runs, i, rec))
+            surf = render(rec, net, trail=trail_upto(t_idx, t_pts, t_runs, i, rec),
+                          callout=callouts[i])
             surf.flush()
             data = surf.get_data()
             stride = surf.get_stride()

@@ -29,9 +29,27 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import hud  # noqa: E402
-from hud import H, W, RoadNet  # noqa: E402
+from hud import H, W, RoadNet, frame_callouts, render as _hud_render  # noqa: E402,F401
 from render import build_trail_index, trail_upto  # noqa: E402
 from settings import encoder_args  # noqa: E402
+
+import bisect  # noqa: E402
+
+OUT_CALLOUT_TTL = 90            # callout hold, in OUTPUT frames (~3s)
+# top-centre band the callout banner lives in; composited only when one is up
+CALLOUT_BAND = (0, int(0.26 * H), int(0.18 * W), int(0.82 * W))
+
+
+def _output_callouts(events, recs):
+    """Remap source-frame events onto output frames (nearest sample)."""
+    if not events:
+        return [None] * len(recs)
+    srcs = [r["_src"] for r in recs]
+    mapped = []
+    for e in events:
+        k = min(bisect.bisect_left(srcs, e["frame"]), len(srcs) - 1)
+        mapped.append({**e, "frame": k, "ttl": OUT_CALLOUT_TTL})
+    return frame_callouts(mapped, len(recs))
 
 # ---------------------------------------------------------------- tuning ---
 
@@ -312,11 +330,14 @@ def main() -> None:
     ap.add_argument("--bitrate", default="14M")
     ap.add_argument("--blur", action="store_true",
                     help="motion-blend turns (slower; reads every source frame)")
+    ap.add_argument("--events", type=Path, help="landmarks.py output")
     ap.add_argument("--dry-run", action="store_true", help="report the plan only")
     args = ap.parse_args()
 
     frames = json.loads(args.frames.read_text())
     n = len(frames)
+    events = (json.loads(args.events.read_text())
+              if args.events and args.events.exists() else [])
 
     turn = turn_rate_series(frames, args.fps)
     rates = smooth_rates(base_rates(frames, args.fps), turn, args.fps)
@@ -342,9 +363,9 @@ def main() -> None:
         return
 
     if args.blur:
-        render_blended(args, frames, spans, n)
+        render_blended(args, frames, spans, n, events)
     else:
-        render_fast(args, frames, rates, n)
+        render_fast(args, frames, rates, n, events)
     print(f"-> {args.out} ({args.out.stat().st_size/1e6:.0f} MB)")
 
 
@@ -370,7 +391,7 @@ def _recs(frames, indices, fps):
     return recs
 
 
-def render_fast(args, frames, rates, n):
+def render_fast(args, frames, rates, n, events=()):
     """Default path: ffmpeg emits only the kept frames; composite HUD bbox only.
 
     One source frame per output frame (no blur), so nothing is read and thrown
@@ -379,6 +400,7 @@ def render_fast(args, frames, rates, n):
     segs = rate_segments(rates, n)
     idx = selected_source_frames(segs)
     recs = _recs(frames, idx, args.fps)
+    callouts = _output_callouts(events, recs)
     print(f"fast path  : {len(segs)} rate segments, piping {len(idx)} of {n} frames")
 
     net = RoadNet(args.roads)
@@ -407,20 +429,26 @@ def render_fast(args, frames, rates, n):
     assert dec.stdout and enc.stdin
     fsz = W * H * 4
     try:
+        def over(la, reg_box):
+            y0, y1, x0, x1 = reg_box
+            reg = la[y0:y1, x0:x1].astype(np.float32)
+            al = reg[:, :, 3:4] / 255.0  # premultiplied -> straight over
+            base[y0:y1, x0:x1] = np.clip(
+                reg + base[y0:y1, x0:x1].astype(np.float32) * (1.0 - al), 0, 255).astype(np.uint8)
+
         for k, rec in enumerate(recs):
             buf = dec.stdout.read(fsz)
             if len(buf) < fsz:
                 break
             base = np.frombuffer(buf, np.uint8).reshape(H, W, 4).copy()
             layer = hud.render(rec, net,
-                               trail=trail_upto(t_idx, t_pts, t_runs, rec["_src"], rec))
+                               trail=trail_upto(t_idx, t_pts, t_runs, rec["_src"], rec),
+                               callout=callouts[k])
             layer.flush()
-            y0, y1, x0, x1 = bbox
             la = np.frombuffer(layer.get_data(), np.uint8).reshape(H, -1, 4)[:, :W, :]
-            reg = la[y0:y1, x0:x1].astype(np.float32)
-            a = reg[:, :, 3:4] / 255.0  # premultiplied -> straight over
-            base[y0:y1, x0:x1] = np.clip(
-                reg + base[y0:y1, x0:x1].astype(np.float32) * (1.0 - a), 0, 255).astype(np.uint8)
+            over(la, bbox)
+            if callouts[k]:                 # banner sits outside the HUD bbox
+                over(la, CALLOUT_BAND)
             enc.stdin.write(base.tobytes())
             if k % 200 == 0 and k:
                 print(f"  {k}/{len(recs)}", flush=True)
@@ -434,13 +462,14 @@ def render_fast(args, frames, rates, n):
         dec.wait()
 
 
-def render_blended(args, frames, spans, n):
+def render_blended(args, frames, spans, n, events=()):
     """--blur path: average several source frames per output frame (smoother
     fast turns), at the cost of reading the whole clip."""
     net = RoadNet(args.roads)
     t_idx, t_pts, t_runs = build_trail_index(frames)
     mids = [int(np.clip(round((a + b) / 2 - 0.5), 0, n - 1)) for a, b in spans]
     recs = _recs(frames, mids, args.fps)
+    callouts = _output_callouts(events, recs)
 
     dec = subprocess.Popen(
         ["ffmpeg", "-v", "error", "-i", str(args.clip),
@@ -475,7 +504,8 @@ def render_blended(args, frames, spans, n):
                 break
             base = acc / got
             layer = hud.render(recs[k], net,
-                               trail=trail_upto(t_idx, t_pts, t_runs, recs[k]["_src"], recs[k]))
+                               trail=trail_upto(t_idx, t_pts, t_runs, recs[k]["_src"], recs[k]),
+                               callout=callouts[k])
             layer.flush()
             la = np.frombuffer(layer.get_data(), np.uint8).reshape(H, -1, 4)[:, :W, :]
             a = la[:, :, 3:4].astype(np.float32) / 255.0

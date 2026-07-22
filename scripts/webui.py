@@ -265,10 +265,31 @@ def roads_for_gpx(gpx: Path, log) -> Path:
     return out
 
 
-def _prepare_drive(drive, gpx: Path, log, calibrate=False):
-    """stitch, map-match, extract roads, (calibrate), frame stream.
+_landmarks_cache: dict = {}
 
-    Returns (video, frames, roads, stamp).
+
+def landmarks_for_gpx(gpx: Path, log) -> Path:
+    """Named-feature geojson for the GPX bbox (peaks/water/parks/... ), cached."""
+    if gpx in _landmarks_cache and _landmarks_cache[gpx].exists():
+        return _landmarks_cache[gpx]
+    tr = _load_gpx_cached(gpx)
+    pts = list(tr.all_points()) if tr else []
+    pad = 0.02
+    lons = [p.lon for p in pts]
+    lats = [p.lat for p in pts]
+    bbox = f"{min(lons)-pad},{min(lats)-pad},{max(lons)+pad},{max(lats)+pad}"
+    out = OUT / f"landmarks_{gpx.stem}.geojson"
+    log("  extracting landmarks...")
+    import landmarks as _lm
+    _lm.extract(bbox, PBF_DIR, out, log)
+    _landmarks_cache[gpx] = out
+    return out
+
+
+def _prepare_drive(drive, gpx: Path, log, calibrate=False):
+    """stitch, map-match, roads, landmarks, (calibrate), frames, events.
+
+    Returns (video, frames, roads, events, stamp).
     """
     stamp = drive[0].start.astimezone(CAMERA_TZ).strftime("%Y%m%d%H%M%S")
     log("  stitching...")
@@ -276,6 +297,7 @@ def _prepare_drive(drive, gpx: Path, log, calibrate=False):
     log("  map-matching GPX...")
     matched = _mapmatch(gpx, log)
     roads = roads_for_gpx(gpx, log)
+    lm = landmarks_for_gpx(gpx, log)
 
     sync = None
     if calibrate:
@@ -291,7 +313,12 @@ def _prepare_drive(drive, gpx: Path, log, calibrate=False):
     if sync:
         cmd += ["--sync", str(sync)]
     _run(cmd, log)
-    return video, frames, roads, stamp
+
+    log("  detecting landmarks/crossings...")
+    events = OUT / f"events_{stamp}.json"
+    _run([PY, str(HERE / "landmarks.py"), "--frames", str(frames), "--landmarks", str(lm),
+          "--admin", str(OUT / "admin.geojson"), "--out", str(events)], log)
+    return video, frames, roads, events, stamp
 
 
 def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
@@ -321,7 +348,7 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 continue
             gpx = gpx_files[gpx_name]
 
-            video, frames, roads, stamp = _prepare_drive(
+            video, frames, roads, events, stamp = _prepare_drive(
                 drive, gpx, log, calibrate=opts.get("calibrate", False))
 
             scale = opts.get("hud_scale", 0.75)
@@ -330,7 +357,7 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 final = OUT / f"drive_{stamp}_timelapse.mp4"
                 cmd = [PY, str(HERE / "timelapse.py"), "--clip", str(video),
                        "--frames", str(frames), "--roads", str(roads),
-                       "--out", str(final)]
+                       "--events", str(events), "--out", str(final)]
                 if opts.get("target_duration"):
                     cmd += ["--target-duration", str(opts["target_duration"])]
             else:
@@ -338,7 +365,7 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 final = OUT / f"drive_{stamp}_hud.mp4"
                 cmd = [PY, str(HERE / "render.py"), "--clip", str(video),
                        "--frames", str(frames), "--roads", str(roads),
-                       "--out", str(final)]
+                       "--events", str(events), "--out", str(final)]
             _run(cmd, log, scale=scale)
             job["results"].append({"drive": i + 1, "file": final.name})
             log(f"  done -> {final.name}")
@@ -373,7 +400,7 @@ def preview_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
 
         job["status"] = "running"
         job["current"] = f"preview drive {i+1}"
-        video, frames, roads, stamp = _prepare_drive(drive, gpx, log, calibrate=False)
+        video, frames, roads, events, stamp = _prepare_drive(drive, gpx, log, calibrate=False)
 
         # middle of the drive
         import json as _json
@@ -382,7 +409,7 @@ def preview_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
         outdir = OUT / "previews" / stamp
         log(f"  rendering frame at {at}s...")
         _run([PY, str(HERE / "hud.py"), "--frames", str(frames),
-              "--roads", str(roads), "--clip", str(video),
+              "--roads", str(roads), "--clip", str(video), "--events", str(events),
               "--at", str(at), "--outdir", str(outdir)],
              log, scale=opts.get("hud_scale", 0.75))
         png = f"previews/{stamp}/hud_{int(at):04d}s.png"

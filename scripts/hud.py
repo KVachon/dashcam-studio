@@ -249,6 +249,121 @@ def text_tracked(ctx, x, y, s, size, tracking, rgb, alpha, bold=False, shadow=Tr
     return cx - x
 
 
+COMPASS_R = 30.0 * SCALE
+
+# callout banner
+CALLOUT_TITLE = 34.0 * SCALE
+CALLOUT_VERB = 15.0 * SCALE
+CALLOUT_CY = 0.13  # fraction of H from the top
+CAT_COLOR = {
+    "water": (0.55, 0.80, 1.0), "state": ACCENT, "county": ACCENT, "city": ACCENT,
+    "peak": (0.72, 0.92, 0.66), "park": (0.72, 0.92, 0.66), "lake": (0.55, 0.85, 0.95),
+}
+
+
+def draw_callout(ctx, callout):
+    """A brief centred banner: verb ('CROSSING') over a bold name, fading in/out."""
+    age, ttl = callout["age"], callout["ttl"]
+    fin, fout = 9, 18
+    if age < fin:
+        a = age / fin
+    elif age > ttl - fout:
+        a = max(0.0, (ttl - age) / fout)
+    else:
+        a = 1.0
+    if a <= 0:
+        return
+
+    title = callout["title"]
+    verb = callout.get("subtitle", "")
+    accent = CAT_COLOR.get(callout.get("category"), ACCENT)
+    cx, cy = W / 2, H * CALLOUT_CY
+
+    tw = text_width(ctx, title, CALLOUT_TITLE, 2.0 * SCALE, bold=True)
+    half = max(tw / 2 + 40 * SCALE, 150 * SCALE)
+
+    # soft rounded backing (temporary + important, so a scrim is justified)
+    ctx.save()
+    r = 14 * SCALE
+    x0, x1 = cx - half, cx + half
+    y0, y1 = cy - 40 * SCALE, cy + 34 * SCALE
+    ctx.new_path()
+    ctx.arc(x0 + r, y0 + r, r, math.pi, 1.5 * math.pi)
+    ctx.arc(x1 - r, y0 + r, r, 1.5 * math.pi, 0)
+    ctx.arc(x1 - r, y1 - r, r, 0, 0.5 * math.pi)
+    ctx.arc(x0 + r, y1 - r, r, 0.5 * math.pi, math.pi)
+    ctx.close_path()
+    ctx.set_source_rgba(0, 0, 0, 0.55 * a)
+    ctx.fill()
+    ctx.restore()
+
+    if verb:
+        vw = text_width(ctx, verb, CALLOUT_VERB, 3.0 * SCALE, bold=True)
+        text_tracked(ctx, cx - vw / 2, cy - 16 * SCALE, verb, CALLOUT_VERB,
+                     3.0 * SCALE, accent, a, bold=True)
+    text_tracked(ctx, cx - tw / 2, cy + 20 * SCALE, title, CALLOUT_TITLE,
+                 2.0 * SCALE, WHITE, a, bold=True)
+
+
+def cardinal(deg: float) -> str:
+    return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][int((deg + 22.5) % 360 // 45)]
+
+
+def frame_callouts(events, n: int) -> list:
+    """Per-frame active callout (with age), later events overriding overlaps."""
+    out = [None] * n
+    for e in sorted(events, key=lambda x: x["frame"]):
+        f, ttl = e["frame"], e.get("ttl", 96)
+        for i in range(max(0, f), min(n, f + ttl)):
+            out[i] = {**e, "age": i - f}
+    return out
+
+
+def draw_compass(ctx, heading, cx, cy, r, dim=1.0):
+    """North-up rose: N stays at top, a needle points the way we're heading."""
+    # ring
+    ctx.arc(cx, cy, r, 0, 2 * math.pi)
+    ctx.set_source_rgba(0, 0, 0, 0.45 * dim)
+    ctx.set_line_width(3.0 * SCALE)
+    ctx.stroke()
+    ctx.arc(cx, cy, r, 0, 2 * math.pi)
+    ctx.set_source_rgba(*WHITE, 0.30 * dim)
+    ctx.set_line_width(1.2 * SCALE)
+    ctx.stroke()
+    # cardinal ticks (N emphasised)
+    for i in range(4):
+        a = i * math.pi / 2 - math.pi / 2
+        r0 = r - (9 if i == 0 else 5) * SCALE
+        ctx.move_to(cx + math.cos(a) * r0, cy + math.sin(a) * r0)
+        ctx.line_to(cx + math.cos(a) * r, cy + math.sin(a) * r)
+        ctx.set_source_rgba(*WHITE, (0.55 if i == 0 else 0.25) * dim)
+        ctx.set_line_width((1.8 if i == 0 else 1.1) * SCALE)
+        ctx.stroke()
+    # small "N" at the north tick
+    text_tracked(ctx, cx - 3.5 * SCALE, cy - r + 12 * SCALE, "N", 11 * SCALE,
+                 0, WHITE, 0.6 * dim, bold=True)
+    # needle toward heading (north-up: 0deg = up = -y)
+    h = math.radians(heading or 0.0)
+    dx, dy = math.sin(h), -math.cos(h)
+    ctx.save()
+    ctx.translate(cx, cy)
+    ctx.move_to(dx * r * 0.78, dy * r * 0.78)          # tip
+    px, py = -dy, dx                                    # perpendicular
+    back = r * 0.30
+    ctx.line_to(-dx * back + px * 4 * SCALE, -dy * back + py * 4 * SCALE)
+    ctx.line_to(-dx * back - px * 4 * SCALE, -dy * back - py * 4 * SCALE)
+    ctx.close_path()
+    ctx.set_source_rgba(0, 0, 0, 0.5 * dim)
+    ctx.set_line_width(3.0 * SCALE)
+    ctx.stroke_preserve()
+    ctx.set_source_rgba(*ACCENT, dim)
+    ctx.fill()
+    ctx.restore()
+    # cardinal readout, to the RIGHT of the rose (no vertical collision)
+    text_tracked(ctx, cx + r + 9 * SCALE, cy + 6 * SCALE, cardinal(heading or 0.0),
+                 17 * SCALE, 1.0 * SCALE, WHITE, 0.85 * dim, bold=True)
+
+
 def text_width(ctx, s, size, tracking, bold=False) -> float:
     ctx.select_font_face(
         FONT,
@@ -268,6 +383,7 @@ def render(
     rec: dict,
     net: RoadNet,
     trail: Optional[List[Tuple[float, float]]] = None,
+    callout: Optional[dict] = None,
 ) -> cairo.ImageSurface:
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
     ctx = cairo.Context(surf)
@@ -410,6 +526,12 @@ def render(
             META_TRACKING, WHITE, 0.55,
         )
 
+    # compass rose, over the dark hood right of the map disc, clear of the text
+    if has_fix and rec.get("heading_deg") is not None:
+        draw_compass(ctx, rec["heading_deg"],
+                     MAP_CX + MAP_R + COMPASS_R + 30 * SCALE,
+                     MAP_CY - MAP_R + COMPASS_R - 4 * SCALE, COMPASS_R, dim=dim)
+
     dist_mi = (rec.get("cum_dist_m") or 0.0) / MI
     w = text_tracked(
         ctx, TEXT_X, MAP_CY + 62.0 * SCALE, f"{dist_mi:.2f}", DIST_SIZE,
@@ -436,6 +558,9 @@ def render(
                 ctx, x + tw + 8.0 * SCALE, MAP_CY + 62.0 * SCALE, abbr,
                 UNIT_SIZE, 2.0 * SCALE, WHITE, 0.50 if has_fix else 0.3,
             )
+
+    if callout:
+        draw_callout(ctx, callout)
 
     return surf
 
@@ -487,17 +612,21 @@ def main() -> None:
     ap.add_argument("--at", type=float, action="append", required=True,
                     help="seconds into the clip; repeatable")
     ap.add_argument("--fps", type=float, default=30.0)
+    ap.add_argument("--events", type=Path, help="landmarks.py output")
     ap.add_argument("--outdir", type=Path, default=Path("out/preview"))
     args = ap.parse_args()
 
     frames = json.loads(args.frames.read_text())
     net = RoadNet(args.roads)
+    callouts = frame_callouts(json.loads(args.events.read_text()), len(frames)) \
+        if args.events and args.events.exists() else [None] * len(frames)
     args.outdir.mkdir(parents=True, exist_ok=True)
 
     for t in args.at:
         i = min(int(round(t * args.fps)), len(frames) - 1)
         rec = frames[i]
-        hud = render(rec, net, trail=build_trail(frames, i, fps=args.fps))
+        hud = render(rec, net, trail=build_trail(frames, i, fps=args.fps),
+                     callout=callouts[i])
 
         out = args.outdir / f"hud_{int(t):04d}s.png"
         if args.clip:
