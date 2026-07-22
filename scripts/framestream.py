@@ -456,6 +456,20 @@ def main() -> None:
     frames = resample(pts, times, place_idx=place_idx)
     apply_zoom(frames)
 
+    # Freeze the map while parked: Arc keeps logging jittery positions at a
+    # stop, and map-matching snaps them to nearby roads, so the inset would
+    # wander while the footage sits still. Below a walking-pace threshold, hold
+    # the last moving position (and thus the trail) instead of following jitter.
+    STATIONARY = 0.8  # m/s
+    hold = None
+    for f in frames:
+        if f.has_fix and f.lat is not None and f.speed_mps is not None:
+            if f.speed_mps < STATIONARY and hold is not None:
+                f.lat, f.lon = hold
+                f.speed_mps = 0.0
+            else:
+                hold = (f.lat, f.lon)
+
     # Cumulative distance reads from 0 at the start of THIS drive. mapmatch
     # counts from the beginning of the whole GPX, so a drive that starts mid-day
     # would otherwise open at the day's running total.

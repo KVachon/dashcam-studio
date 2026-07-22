@@ -57,7 +57,7 @@ def stats(frames, events, fps=30.0) -> dict:
     }
 
 
-def render_card(st: dict, out_png: Path, W=940, H=620):
+def render_card(st: dict, out_png: Path, W=940, H=690):
     s = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
     c = cairo.Context(s)
     c.set_source_rgb(0.05, 0.06, 0.08)
