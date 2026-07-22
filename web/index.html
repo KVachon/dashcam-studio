@@ -105,6 +105,9 @@
   .pv .load{font-size:12px;color:var(--dim);margin-top:6px}
   .cardimg{width:100%;max-width:560px;border-radius:8px;border:1px solid var(--line);
     margin:6px 0 14px;cursor:zoom-in;display:block}
+  .sysdetails>summary{cursor:pointer;list-style:none;font-size:14px;padding:2px 0}
+  .sysdetails>summary::-webkit-details-marker{display:none}
+  .sysdetails>summary .mk{margin-right:8px}
   #lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;
     align-items:center;justify-content:center;z-index:20;cursor:zoom-out;padding:24px}
   #lightbox.on{display:flex}
@@ -251,7 +254,11 @@ async function loadPreflight(){
     if(!c.ok && c.fix)
       h += `<details class="fix"><summary>how to fix</summary><pre>${c.fix}</pre></details>`;
   }
-  $('#preflight').innerHTML = h;
+  // collapsed when all-clear; auto-expanded when something needs attention
+  const sum = r.ok ? `<span class="mk ok">✓</span> all ${r.checks.length} dependencies ready`
+                   : `<span class="mk no">✗</span> ${r.checks.length-nOk} issue(s) — click for details`;
+  $('#preflight').innerHTML =
+    `<details class="sysdetails" ${r.ok?'':'open'}><summary>${sum}</summary>${h}</details>`;
 }
 
 // ---- browse modal ----
