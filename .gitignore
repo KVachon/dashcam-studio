@@ -1,0 +1,34 @@
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- large / generated data (never commit) ---
+# rendered videos, frames, previews, matched.json
+out/
+# stitched drives
+drives/
+# incoming footage
+clips/
+# incoming GPS tracks
+gpxfiles/
+# OSM .pbf extracts and built Valhalla tiles
+valhalla/custom_files/
+
+# --- media & tracks (personal data — do not publish) ---
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.gpx
+*.osm.pbf
+*.geojson
+
+# --- scratch ---
+*.log

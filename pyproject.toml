@@ -1,0 +1,32 @@
+[project]
+name = "dashcam-studio"
+version = "0.1.0"
+description = "Turn dashcam footage plus a phone GPS track into drive videos with a live map/HUD overlay — fully offline."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Kurt Vachon" }]
+keywords = ["dashcam", "gpx", "hud", "overlay", "valhalla", "map-matching", "ffmpeg", "timelapse"]
+
+dependencies = [
+    "flask>=3.1",
+    "pywebview>=6.2",
+    "numpy>=2.0",
+    "pycairo>=1.28",
+    "shapely>=2.0",
+    "timezonefinder>=8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/USER/dashcam-studio"
+Issues = "https://github.com/USER/dashcam-studio/issues"
+
+# Not a build target — this project runs from source (scripts/). The manifest
+# exists to declare dependencies and metadata; install them with:
+#   uv pip install -r requirements.txt      (or)   pip install -e .
+
+[tool.dashcam]
+# External, non-Python tools the pipeline shells out to (see README):
+#   ffmpeg / ffprobe   — video decode/encode
+#   docker             — runs the Valhalla routing engine
+#   osmium-tool        — OSM road/boundary extraction (conda-forge or brew)
