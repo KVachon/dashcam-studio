@@ -367,8 +367,16 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                        "--frames", str(frames), "--roads", str(roads),
                        "--events", str(events), "--out", str(final)]
             _run(cmd, log, scale=scale)
-            job["results"].append({"drive": i + 1, "file": final.name})
-            log(f"  done -> {final.name}")
+
+            log("  building summary card + end-slate...")
+            card = OUT / f"card_{stamp}.png"
+            slated = final.with_name(final.stem + "_final.mp4")
+            _run([PY, str(HERE / "summary.py"), "--frames", str(frames),
+                  "--events", str(events), "--card", str(card),
+                  "--video", str(final), "--out", str(slated)], log)
+            job["results"].append({"drive": i + 1, "file": slated.name,
+                                   "card": card.name})
+            log(f"  done -> {slated.name}")
 
         job["status"] = "done"
         job["current"] = ""
