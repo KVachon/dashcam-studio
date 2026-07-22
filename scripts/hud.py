@@ -249,7 +249,6 @@ def text_tracked(ctx, x, y, s, size, tracking, rgb, alpha, bold=False, shadow=Tr
     return cx - x
 
 
-COMPASS_R = 30.0 * SCALE
 
 # callout banner
 CALLOUT_TITLE = 34.0 * SCALE
@@ -305,10 +304,6 @@ def draw_callout(ctx, callout):
                  2.0 * SCALE, WHITE, a, bold=True)
 
 
-def cardinal(deg: float) -> str:
-    return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][int((deg + 22.5) % 360 // 45)]
-
-
 def frame_callouts(events, n: int) -> list:
     """Per-frame active callout (with age), later events overriding overlaps."""
     out = [None] * n
@@ -317,51 +312,6 @@ def frame_callouts(events, n: int) -> list:
         for i in range(max(0, f), min(n, f + ttl)):
             out[i] = {**e, "age": i - f}
     return out
-
-
-def draw_compass(ctx, heading, cx, cy, r, dim=1.0):
-    """North-up rose: N stays at top, a needle points the way we're heading."""
-    # ring
-    ctx.arc(cx, cy, r, 0, 2 * math.pi)
-    ctx.set_source_rgba(0, 0, 0, 0.45 * dim)
-    ctx.set_line_width(3.0 * SCALE)
-    ctx.stroke()
-    ctx.arc(cx, cy, r, 0, 2 * math.pi)
-    ctx.set_source_rgba(*WHITE, 0.30 * dim)
-    ctx.set_line_width(1.2 * SCALE)
-    ctx.stroke()
-    # cardinal ticks (N emphasised)
-    for i in range(4):
-        a = i * math.pi / 2 - math.pi / 2
-        r0 = r - (9 if i == 0 else 5) * SCALE
-        ctx.move_to(cx + math.cos(a) * r0, cy + math.sin(a) * r0)
-        ctx.line_to(cx + math.cos(a) * r, cy + math.sin(a) * r)
-        ctx.set_source_rgba(*WHITE, (0.55 if i == 0 else 0.25) * dim)
-        ctx.set_line_width((1.8 if i == 0 else 1.1) * SCALE)
-        ctx.stroke()
-    # small "N" at the north tick
-    text_tracked(ctx, cx - 3.5 * SCALE, cy - r + 12 * SCALE, "N", 11 * SCALE,
-                 0, WHITE, 0.6 * dim, bold=True)
-    # needle toward heading (north-up: 0deg = up = -y)
-    h = math.radians(heading or 0.0)
-    dx, dy = math.sin(h), -math.cos(h)
-    ctx.save()
-    ctx.translate(cx, cy)
-    ctx.move_to(dx * r * 0.78, dy * r * 0.78)          # tip
-    px, py = -dy, dx                                    # perpendicular
-    back = r * 0.30
-    ctx.line_to(-dx * back + px * 4 * SCALE, -dy * back + py * 4 * SCALE)
-    ctx.line_to(-dx * back - px * 4 * SCALE, -dy * back - py * 4 * SCALE)
-    ctx.close_path()
-    ctx.set_source_rgba(0, 0, 0, 0.5 * dim)
-    ctx.set_line_width(3.0 * SCALE)
-    ctx.stroke_preserve()
-    ctx.set_source_rgba(*ACCENT, dim)
-    ctx.fill()
-    ctx.restore()
-    # cardinal readout, to the RIGHT of the rose (no vertical collision)
-    text_tracked(ctx, cx + r + 9 * SCALE, cy + 6 * SCALE, cardinal(heading or 0.0),
-                 17 * SCALE, 1.0 * SCALE, WHITE, 0.85 * dim, bold=True)
 
 
 def text_width(ctx, s, size, tracking, bold=False) -> float:
@@ -525,12 +475,6 @@ def render(
             ctx, TEXT_X, MAP_CY + 8.0 * SCALE, name.upper(), META_SIZE,
             META_TRACKING, WHITE, 0.55,
         )
-
-    # compass rose, over the dark hood right of the map disc, clear of the text
-    if has_fix and rec.get("heading_deg") is not None:
-        draw_compass(ctx, rec["heading_deg"],
-                     MAP_CX + MAP_R + COMPASS_R + 30 * SCALE,
-                     MAP_CY - MAP_R + COMPASS_R - 4 * SCALE, COMPASS_R, dim=dim)
 
     dist_mi = (rec.get("cum_dist_m") or 0.0) / MI
     w = text_tracked(
