@@ -32,3 +32,6 @@ valhalla/custom_files/
 
 # --- scratch ---
 *.log
+
+# UI state
+.ui_prefs.json

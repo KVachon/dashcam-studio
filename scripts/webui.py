@@ -460,6 +460,17 @@ def browse():
                     "shortcuts": folder_shortcuts()})
 
 
+PREFS = ROOT / ".ui_prefs.json"
+
+
+@app.get("/api/prefs")
+def api_prefs():
+    try:
+        return jsonify(json.loads(PREFS.read_text()))
+    except Exception:
+        return jsonify({})
+
+
 @app.post("/api/scan")
 def api_scan():
     d = request.get_json()
@@ -469,6 +480,10 @@ def api_scan():
         return jsonify({"error": f"not a folder: {clips}"}), 400
     if not gpx.is_dir():
         return jsonify({"error": f"not a folder: {gpx}"}), 400
+    try:
+        PREFS.write_text(json.dumps({"clips_dir": str(clips), "gpx_dir": str(gpx)}))
+    except Exception:
+        pass
     return jsonify(scan(clips, gpx))
 
 

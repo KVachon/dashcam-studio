@@ -427,6 +427,10 @@ function preview(file, btn){
 }
 
 loadPreflight();
+jget('/api/prefs').then(p=>{
+  if(p.clips_dir) $('#clips').value = p.clips_dir;
+  if(p.gpx_dir) $('#gpx').value = p.gpx_dir;
+}).catch(()=>{});
 </script>
 </body>
 </html>
