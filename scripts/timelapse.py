@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -362,7 +363,8 @@ def _recs(frames, indices, fps):
         r = dict(frames[int(i)])
         r["_src"] = int(i)
         if r.get("t_display"):
-            r["t_display"] = r["t_display"][:5]  # seconds are noise at speed
+            # drop seconds but keep AM/PM: "4:16:23 PM" -> "4:16 PM"
+            r["t_display"] = re.sub(r"(\d+:\d\d):\d\d", r"\1", r["t_display"])
         recs.append(r)
     resmooth_zoom(recs, fps)
     return recs

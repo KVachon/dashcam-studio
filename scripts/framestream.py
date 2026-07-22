@@ -199,7 +199,10 @@ def resample(
 
     def clock(when: datetime, tzname: Optional[str]):
         loc = when.astimezone(_zoneinfo(tzname))
-        return loc.strftime("%H:%M:%S"), loc.strftime("%Z")
+        # 12-hour, no leading zero. Built by hand rather than %-I/%#I so it is
+        # identical on macOS, Linux and Windows.
+        h = loc.hour % 12 or 12
+        return f"{h}:{loc.minute:02d}:{loc.second:02d} {loc.strftime('%p')}", loc.strftime("%Z")
 
     out: List[FrameRecord] = []
     for i, when in enumerate(times):
@@ -355,6 +358,20 @@ def frame_times(start: datetime, duration_s: float, fps: float) -> List[datetime
     return [start + timedelta(seconds=i / fps) for i in range(n)]
 
 
+def frame_times_segmented(segments, offset: float, fps: float) -> List[datetime]:
+    """Real UTC of every frame of a stitched drive, clip by clip.
+
+    The stitched video is gapless, but its source clips are not: each clip's
+    frames map to that clip's own wall-clock window. Concatenating them gives the
+    true time of each stitched frame, so the map stays synced across gaps.
+    """
+    out: List[datetime] = []
+    for seg in segments:
+        base = datetime.fromtimestamp(seg["start_epoch"] + offset, tz=timezone.utc)
+        out.extend(base + timedelta(seconds=j / fps) for j in range(int(seg["n_frames"])))
+    return out
+
+
 def load_sync_offset(path: Path, clip_name: str) -> float:
     """Calibrated clip-start correction (seconds), only if trustworthy.
 
@@ -426,9 +443,27 @@ def main() -> None:
     if place_idx is None:
         print(f"! no city/state ({args.admin} missing or shapely unavailable)")
 
-    times = frame_times(start, duration, args.fps)
+    # A stitched drive's clips are not gapless, so each frame's real time comes
+    # from its clip (segments sidecar), not drive_start + i/fps. Single clips
+    # (no sidecar) fall back to the simple timeline.
+    seg_path = args.clip.with_suffix(".segments.json")
+    if seg_path.exists():
+        segs = json.loads(seg_path.read_text())
+        times = frame_times_segmented(segs, offset, args.fps)
+        print(f"timeline     : {len(segs)} clip(s), {len(times)} frames (gap-aware)")
+    else:
+        times = frame_times(start, duration, args.fps)
     frames = resample(pts, times, place_idx=place_idx)
     apply_zoom(frames)
+
+    # Cumulative distance reads from 0 at the start of THIS drive. mapmatch
+    # counts from the beginning of the whole GPX, so a drive that starts mid-day
+    # would otherwise open at the day's running total.
+    base = next((f.cum_dist_m for f in frames if f.cum_dist_m is not None), None)
+    if base:
+        for f in frames:
+            if f.cum_dist_m is not None:
+                f.cum_dist_m = round(max(0.0, f.cum_dist_m - base), 2)
 
     with_fix = sum(1 for f in frames if f.has_fix)
     print(f"clip start   : {start.astimezone(CAMERA_TZ):%H:%M:%S} local")

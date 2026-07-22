@@ -56,6 +56,30 @@ def probe_duration(path: Path) -> float:
     return float(out.strip())
 
 
+def probe_frames(path: Path) -> int:
+    """Exact video frame count of a clip (falls back to duration*fps).
+
+    Parsed by key: ffprobe emits fields in its own fixed order, not the order
+    requested, so positional parsing silently grabs the wrong value.
+    """
+    out = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=nb_frames,r_frame_rate,duration",
+         "-of", "default=noprint_wrappers=1", str(path)]
+    ).decode()
+    kv = dict(line.split("=", 1) for line in out.strip().splitlines() if "=" in line)
+    try:
+        n = int(kv.get("nb_frames", "0"))
+        if n > 0:
+            return n
+    except ValueError:
+        pass
+    num, _, den = kv.get("r_frame_rate", "30/1").partition("/")
+    fps = float(num) / float(den or 1)
+    dur = float(kv.get("duration") or probe_duration(path))
+    return int(round(dur * fps))
+
+
 def clip_paths(d: Path) -> List[Path]:
     """Video files in d, minus macOS junk.
 
@@ -110,7 +134,15 @@ def group_drives(clips: List[Clip], gap_s: float = NEW_DRIVE_GAP_S) -> List[List
 
 
 def stitch(drive: List[Clip], out_dir: Path) -> Path:
-    """Lossless concat. A single-clip drive is just copied through the same path."""
+    """Lossless concat. A single-clip drive is just copied through the same path.
+
+    Also writes a `.segments.json` sidecar giving each clip's true start time and
+    frame count. Fitcamx clips are NOT gapless -- event/motion recording leaves
+    big gaps -- so the overlay must map each stitched frame to its clip's real
+    time, not assume drive_start + i/fps. framestream reads this sidecar.
+    """
+    import json
+
     stamp = drive[0].start.astimezone(CAMERA_TZ).strftime("%Y%m%d%H%M%S")
     out = out_dir / f"drive_{stamp}.mp4"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -123,6 +155,10 @@ def stitch(drive: List[Clip], out_dir: Path) -> Path:
         check=True,
     )
     listfile.unlink(missing_ok=True)
+
+    segments = [{"start_epoch": c.start.timestamp(), "n_frames": probe_frames(c.path)}
+                for c in drive]
+    out.with_suffix(".segments.json").write_text(json.dumps(segments))
     return out
 
 

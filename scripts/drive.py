@@ -53,19 +53,24 @@ def process_drive(drive, args, idx: int) -> Path:
     video = stitch(drive, args.out / "drives")
     print(f"  stitched -> {video.name}")
 
-    # 2. calibrate this drive's clock (writes a per-drive sync file)
-    sync = args.out / f"sync_{stamp}.json"
-    out = run([PY, str(HERE / "calibrate.py"), "--clip", str(video),
-               "--gpx", str(args.gpx), "--out", str(sync)])
-    for line in out.splitlines():
-        if any(k in line for k in ("method", "offset", "confidence")):
-            print(f"  {line.strip()}")
+    # 2. optionally calibrate the clock (off by default: the filename timestamp
+    #    is accurate on a CFR camera, and a spurious sync offset drifts the map).
+    sync = None
+    if args.calibrate:
+        sync = args.out / f"sync_{stamp}.json"
+        out = run([PY, str(HERE / "calibrate.py"), "--clip", str(video),
+                   "--gpx", str(args.gpx), "--out", str(sync)])
+        for line in out.splitlines():
+            if any(k in line for k in ("method", "offset", "confidence")):
+                print(f"  {line.strip()}")
 
     # 3. one continuous frame stream for the whole drive
     frames = args.out / f"frames_{stamp}.json"
-    run([PY, str(HERE / "framestream.py"), str(args.matched),
-         "--clip", str(video), "--admin", str(args.admin),
-         "--sync", str(sync), "--json", str(frames)])
+    cmd = [PY, str(HERE / "framestream.py"), str(args.matched),
+           "--clip", str(video), "--admin", str(args.admin), "--json", str(frames)]
+    if sync:
+        cmd += ["--sync", str(sync)]
+    run(cmd)
     print(f"  frames   -> {frames.name}")
 
     # 4. render the HUD onto the stitched drive
@@ -86,6 +91,8 @@ def main() -> None:
     ap.add_argument("--admin", type=Path, default=Path("out/admin.geojson"))
     ap.add_argument("--out", type=Path, default=Path("out"))
     ap.add_argument("--gap", type=float, default=600.0)
+    ap.add_argument("--calibrate", action="store_true",
+                    help="auto-correct the camera clock (off by default; only for a mis-set clock)")
     args = ap.parse_args()
 
     clips, skipped = load_clips(args.clips)

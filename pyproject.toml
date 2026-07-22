@@ -18,8 +18,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/USER/dashcam-studio"
-Issues = "https://github.com/USER/dashcam-studio/issues"
+Homepage = "https://github.com/KVachon/dashcam-studio"
+Issues = "https://github.com/KVachon/dashcam-studio/issues"
 
 # Not a build target — this project runs from source (scripts/). The manifest
 # exists to declare dependencies and metadata; install them with:

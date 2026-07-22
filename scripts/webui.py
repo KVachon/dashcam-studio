@@ -215,7 +215,7 @@ def _mapmatch(gpx: Path, log) -> Path:
     return out
 
 
-def _prepare_drive(drive, gpx: Path, log, calibrate=True):
+def _prepare_drive(drive, gpx: Path, log, calibrate=False):
     """stitch -> map-match -> (calibrate) -> frame stream. Returns (video, frames, stamp)."""
     stamp = drive[0].start.astimezone(CAMERA_TZ).strftime("%Y%m%d%H%M%S")
     log("  stitching...")
@@ -267,7 +267,8 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 continue
             gpx = gpx_files[gpx_name]
 
-            video, frames, stamp = _prepare_drive(drive, gpx, log)
+            video, frames, stamp = _prepare_drive(
+                drive, gpx, log, calibrate=opts.get("calibrate", False))
 
             scale = opts.get("hud_scale", 0.75)
             if opts.get("mode") == "timelapse":
