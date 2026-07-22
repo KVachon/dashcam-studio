@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gpxtrack import CAMERA_TZ, clip_start_utc
+from gpxtrack import CAMERA_TZ, clip_start_utc, haversine_m
 
 # Displayed wall-clock follows the *position*, not the camera. The camera has no
 # GPS, so its clock stays on whatever zone it was set to -- that fixed zone is
@@ -456,24 +456,35 @@ def main() -> None:
     frames = resample(pts, times, place_idx=place_idx)
     apply_zoom(frames)
 
-    # Freeze the map while parked: Arc keeps logging jittery positions at a
-    # stop, and map-matching snaps them to nearby roads, so the inset would
-    # wander while the footage sits still. Instantaneous speed is fooled by the
-    # jitter (points jump several metres), so gate on speed averaged over a few
-    # seconds and hold the last moving position when it's below a crawl.
-    STATIONARY = 1.6  # m/s (~3.6 mph)
-    win = max(1, int(2.5 * args.fps))
-    sp = [(f.speed_mps or 0.0) for f in frames]
-    smooth = [sum(sp[max(0, i - win):i + win + 1]) / len(sp[max(0, i - win):i + win + 1])
-              for i in range(len(frames))]
-    hold = None
-    for i, f in enumerate(frames):
-        if f.has_fix and f.lat is not None:
-            if smooth[i] < STATIONARY and hold is not None:
-                f.lat, f.lon = hold
+    # Freeze the map while parked. Speed is unreliable (map-matching snaps GPS
+    # jitter across roads, so a parked car reads as fast). The reliable signal
+    # is the GPS SLEEP: Arc stops logging when stationary, then wakes with jitter
+    # near the same spot. So once the fix goes stale (a >30s no-fix gap) and
+    # later resumes within PARK_R of where it stalled, it is the same stop --
+    # hold at that anchor until the fix genuinely moves away. Validated against a
+    # real YMCA park: the map stops wandering during the cool-down minutes.
+    PARK_R = 150.0  # metres
+    anchor = None
+    last = None
+    gap = False
+    for f in frames:
+        if not (f.has_fix and f.lat is not None):
+            if f.lat is not None and last is not None:
+                gap = True   # a held/bridged no-fix stretch
+            continue
+        pos = (f.lat, f.lon)
+        if gap and last is not None and \
+                haversine_m(last[0], last[1], pos[0], pos[1]) < PARK_R:
+            anchor = last   # resumed near where it stalled -> still parked
+        gap = False
+        if anchor is not None:
+            if haversine_m(anchor[0], anchor[1], pos[0], pos[1]) < PARK_R:
+                f.lat, f.lon = anchor
                 f.speed_mps = 0.0
+                pos = anchor
             else:
-                hold = (f.lat, f.lon)
+                anchor = None   # actually drove away
+        last = pos
 
     # Cumulative distance reads from 0 at the start of THIS drive. mapmatch
     # counts from the beginning of the whole GPX, so a drive that starts mid-day
