@@ -317,6 +317,11 @@ iCloud, right-click the folder in Finder → **Download Now** (or `brctl downloa
   not "drive 1".
 - **Per-drive selection** — checkboxes pick which drives to process; Process
   runs only those. Handy when a card holds many drives but you want a few.
+- **Auto road extraction** — the map inset's road geometry is extracted per
+  drive for the GPX's own bounding box (from any `.pbf` in
+  `valhalla/custom_files`), so the mini-map covers wherever you actually drove
+  without a hand-picked region. `admin.geojson` (city/state) stays whole-region
+  because state polygons must not be clipped.
 - **Frame preview** — a per-drive button renders one HUD frame from the middle
   of the drive (~10s; skips calibration and reuses the cached map-match) so you
   can check the look before committing to a full render. Click the thumbnail to

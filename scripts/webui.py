@@ -215,13 +215,67 @@ def _mapmatch(gpx: Path, log) -> Path:
     return out
 
 
+_roads_cache: dict = {}
+PBF_DIR = ROOT / "valhalla" / "custom_files"
+
+
+def roads_for_gpx(gpx: Path, log) -> Path:
+    """Extract the map-inset road geometry for THIS GPX's bounding box.
+
+    The inset only ever shows streets near where you drove, so we clip roads to
+    the track's bbox (+~2km) rather than a fixed region -- the map then covers
+    any drive automatically. Cached per GPX; merged across every .pbf present.
+    """
+    if gpx in _roads_cache and _roads_cache[gpx].exists():
+        return _roads_cache[gpx]
+
+    tr = _load_gpx_cached(gpx)
+    pts = list(tr.all_points()) if tr else []
+    if not pts:
+        raise RuntimeError(f"no points in {gpx.name}; cannot extract roads")
+    pad = 0.02  # ~2.2 km
+    lons = [p.lon for p in pts]
+    lats = [p.lat for p in pts]
+    bbox = f"{min(lons)-pad},{min(lats)-pad},{max(lons)+pad},{max(lats)+pad}"
+
+    out = OUT / f"roads_{gpx.stem}.geojson"
+    feats = []
+    log(f"  extracting road map for bbox {bbox}...")
+    for i, pbf in enumerate(sorted(PBF_DIR.glob("*.pbf"))):
+        area = OUT / f"_area_{i}.osm.pbf"
+        roads = OUT / f"_roads_{i}.osm.pbf"
+        gj = OUT / f"_roads_{i}.geojson"
+        try:
+            _run(["osmium", "extract", "-b", bbox, str(pbf), "-o", str(area), "--overwrite"], log)
+            _run(["osmium", "tags-filter", str(area), "w/highway", "-o", str(roads), "--overwrite"], log)
+            _run(["osmium", "export", str(roads), "--geometry-types=linestring",
+                  "--add-unique-id=type_id", "-o", str(gj), "--overwrite"], log)
+            feats += json.loads(gj.read_text()).get("features", [])
+        except Exception as e:
+            log(f"  ! {pbf.name}: {e}")
+        finally:
+            for f in (area, roads, gj):
+                f.unlink(missing_ok=True)
+
+    if not feats:
+        raise RuntimeError("no roads extracted; is the .pbf loaded and does it cover the drive?")
+    out.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+    log(f"  road map: {len(feats)} features")
+    _roads_cache[gpx] = out
+    return out
+
+
 def _prepare_drive(drive, gpx: Path, log, calibrate=False):
-    """stitch -> map-match -> (calibrate) -> frame stream. Returns (video, frames, stamp)."""
+    """stitch, map-match, extract roads, (calibrate), frame stream.
+
+    Returns (video, frames, roads, stamp).
+    """
     stamp = drive[0].start.astimezone(CAMERA_TZ).strftime("%Y%m%d%H%M%S")
     log("  stitching...")
     video = stitch(drive, OUT / "drives")
     log("  map-matching GPX...")
     matched = _mapmatch(gpx, log)
+    roads = roads_for_gpx(gpx, log)
 
     sync = None
     if calibrate:
@@ -237,7 +291,7 @@ def _prepare_drive(drive, gpx: Path, log, calibrate=False):
     if sync:
         cmd += ["--sync", str(sync)]
     _run(cmd, log)
-    return video, frames, stamp
+    return video, frames, roads, stamp
 
 
 def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
@@ -267,7 +321,7 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 continue
             gpx = gpx_files[gpx_name]
 
-            video, frames, stamp = _prepare_drive(
+            video, frames, roads, stamp = _prepare_drive(
                 drive, gpx, log, calibrate=opts.get("calibrate", False))
 
             scale = opts.get("hud_scale", 0.75)
@@ -275,7 +329,7 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 log("  rendering timelapse...")
                 final = OUT / f"drive_{stamp}_timelapse.mp4"
                 cmd = [PY, str(HERE / "timelapse.py"), "--clip", str(video),
-                       "--frames", str(frames), "--roads", str(OUT / "roads.geojson"),
+                       "--frames", str(frames), "--roads", str(roads),
                        "--out", str(final)]
                 if opts.get("target_duration"):
                     cmd += ["--target-duration", str(opts["target_duration"])]
@@ -283,7 +337,7 @@ def process_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
                 log("  rendering HUD...")
                 final = OUT / f"drive_{stamp}_hud.mp4"
                 cmd = [PY, str(HERE / "render.py"), "--clip", str(video),
-                       "--frames", str(frames), "--roads", str(OUT / "roads.geojson"),
+                       "--frames", str(frames), "--roads", str(roads),
                        "--out", str(final)]
             _run(cmd, log, scale=scale)
             job["results"].append({"drive": i + 1, "file": final.name})
@@ -319,7 +373,7 @@ def preview_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
 
         job["status"] = "running"
         job["current"] = f"preview drive {i+1}"
-        video, frames, stamp = _prepare_drive(drive, gpx, log, calibrate=False)
+        video, frames, roads, stamp = _prepare_drive(drive, gpx, log, calibrate=False)
 
         # middle of the drive
         import json as _json
@@ -328,7 +382,7 @@ def preview_job(job_id: str, clips_dir: Path, gpx_dir: Path, opts: dict):
         outdir = OUT / "previews" / stamp
         log(f"  rendering frame at {at}s...")
         _run([PY, str(HERE / "hud.py"), "--frames", str(frames),
-              "--roads", str(OUT / "roads.geojson"), "--clip", str(video),
+              "--roads", str(roads), "--clip", str(video),
               "--at", str(at), "--outdir", str(outdir)],
              log, scale=opts.get("hud_scale", 0.75))
         png = f"previews/{stamp}/hud_{int(at):04d}s.png"
